@@ -1,11 +1,10 @@
 # gesture_classifier.py
 # Clasifica A-Z comparando la mano con las 26 reglas y eligiendo la mejor coincidencia.
 
-import math
-from collections import deque
 from typing import Callable, Dict, List, Optional, Tuple
 
 from .finger_analyzer import FingerState
+from .motion_detector import MotionDetector
 
 ScoreFn = Callable[[FingerState, bool, bool], float]
 
@@ -25,61 +24,14 @@ class GestureClassifier:
         except Exception:
             self._STABILITY_THRESHOLD = 6
 
-        self._motion_key: Optional[tuple] = None
-        self._index_trail: deque = deque(maxlen=10)
-        self._pinky_trail: deque = deque(maxlen=10)
+        self._motion = MotionDetector()
         self._scorers: Dict[str, ScoreFn] = self._build_scorers()
 
     def _reset_motion(self) -> None:
-        self._motion_key = None
-        self._index_trail.clear()
-        self._pinky_trail.clear()
+        self._motion.reset()
 
     def _update_motion(self, f: FingerState) -> Tuple[bool, bool]:
-        key = (f.index, f.middle, f.ring, f.pinky)
-        if key != self._motion_key:
-            self._motion_key = key
-            self._index_trail.clear()
-            self._pinky_trail.clear()
-        self._index_trail.append(f.index_tip)
-        self._pinky_trail.append(f.pinky_tip)
-        return self._motion_j(f), self._motion_z(f)
-
-    def _path_stats(self, trail, pw: float) -> Tuple[float, float, float, int]:
-        if len(trail) < 2:
-            return 0.0, 0.0, 0.0, 0
-        xs = [p[0] for p in trail]
-        ys = [p[1] for p in trail]
-        total = 0.0
-        for i in range(1, len(trail)):
-            dx = trail[i][0] - trail[i - 1][0]
-            dy = trail[i][1] - trail[i - 1][1]
-            total += math.hypot(dx, dy) if (dx * dx + dy * dy) > 0 else 0
-        signs: List[int] = []
-        for i in range(1, len(trail)):
-            dx = trail[i][0] - trail[i - 1][0]
-            if abs(dx) >= pw * 0.02:
-                signs.append(1 if dx > 0 else -1)
-        changes = sum(1 for i in range(1, len(signs)) if signs[i] != signs[i - 1])
-        return max(xs) - min(xs), max(ys) - min(ys), total, changes
-
-    def _motion_j(self, f: FingerState) -> bool:
-        pw = f.palm_width
-        if not f.pinky or f.index or f.middle:
-            return False
-        xr, yr, total, _ = self._path_stats(self._pinky_trail, pw)
-        if len(self._pinky_trail) < 3 or total < pw * 0.14:
-            return False
-        return xr > pw * 0.06 or yr > pw * 0.06 or total > pw * 0.22
-
-    def _motion_z(self, f: FingerState) -> bool:
-        pw = f.palm_width
-        if not f.index or not f.index_up:
-            return False
-        xr, yr, total, changes = self._path_stats(self._index_trail, pw)
-        if len(self._index_trail) < 3 or total < pw * 0.16:
-            return False
-        return xr > pw * 0.10 and changes >= 1
+        return self._motion.update(f)
 
     def _add(self, score: float, cond: bool, pts: float) -> float:
         return score + (pts if cond else 0.0)

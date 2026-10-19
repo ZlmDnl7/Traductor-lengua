@@ -1,5 +1,9 @@
 # voice_transcriber.py
-# Grabacion con microfono y transcripcion en espanol con faster-whisper (local, open source).
+# Grabacion con microfono y transcripcion con faster-whisper (local, open source).
+# El idioma de transcripcion sale del perfil del idioma de aprendizaje
+# (src/languages/profiles.py): es-CO -> "es", en-US -> "en", pt-BR -> "pt".
+# El modelo de Whisper configurado (WHISPER_MODEL_NAME) debe ser multilingue
+# (tiny/base/small/medium/large-v3, NO las variantes ".en").
 
 import threading
 from typing import Optional
@@ -9,24 +13,31 @@ import numpy as np
 from src.config import VOICE_SAMPLE_RATE
 
 _model = None
-_hotwords_data_cache: Optional[dict] = None
+_hotwords_data_cache: dict = {}
 
 
-def _load_hotwords_data() -> dict:
-    """Devuelve {'priority': [...], 'all': [...]} desde hotwords_es.txt."""
-    global _hotwords_data_cache
-    if _hotwords_data_cache is not None:
-        return _hotwords_data_cache
+class VoiceInputError(RuntimeError):
+    """Error de microfono con un codigo traducible (ver src/languages/messages.py)."""
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+
+
+def _load_hotwords_data(language: str = "es") -> dict:
+    """Devuelve {'priority': [...], 'all': [...]} desde el archivo de hotwords del idioma."""
+    if language in _hotwords_data_cache:
+        return _hotwords_data_cache[language]
     empty = {"priority": [], "all": []}
     try:
         import os
-        from src.config import WHISPER_HOTWORDS_FILE, WHISPER_HOTWORDS_MAX
+        from src.config import WHISPER_HOTWORDS_MAX
+        from src.languages import get_profile, project_path
 
-        project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        path = os.path.join(project_root, WHISPER_HOTWORDS_FILE)
-        if not os.path.exists(path):
-            _hotwords_data_cache = empty
-            return _hotwords_data_cache
+        path = project_path(get_profile(language).hotwords_file)
+        if not path or not os.path.exists(path):
+            _hotwords_data_cache[language] = empty
+            return empty
 
         cap = int(WHISPER_HOTWORDS_MAX)
         priority: list = []
@@ -54,24 +65,25 @@ def _load_hotwords_data() -> dict:
                 if in_priority:
                     priority.append(raw)
 
-        _hotwords_data_cache = {"priority": priority, "all": all_items[:cap]}
-        return _hotwords_data_cache
+        data = {"priority": priority, "all": all_items[:cap]}
+        _hotwords_data_cache[language] = data
+        return data
     except Exception:
-        _hotwords_data_cache = empty
-        return _hotwords_data_cache
+        _hotwords_data_cache[language] = empty
+        return empty
 
 
-def load_hotwords() -> list:
-    """Lista completa de hotwords (para compatibilidad)."""
-    return _load_hotwords_data()["all"]
+def load_hotwords(language: str = "es") -> list:
+    """Lista completa de hotwords del idioma (vacia si el idioma no tiene archivo)."""
+    return _load_hotwords_data(language)["all"]
 
 
-def _whisper_bias_strings(hotwords: list) -> tuple[Optional[str], Optional[str]]:
+def _whisper_bias_strings(hotwords: list, language: str = "es") -> tuple[Optional[str], Optional[str]]:
     """
     Arma sesgo corto para Whisper. El modelo base tiene limite ~448 tokens de prompt;
     pasar 400+ hotwords rompe con 'No position encodings are defined for positions >= 448'.
     """
-    data = _load_hotwords_data()
+    data = _load_hotwords_data(language)
     priority = data.get("priority") or []
     if not hotwords and not priority:
         return None, None
@@ -270,7 +282,7 @@ def record_until_stop(stop_event: threading.Event, samplerate: int = VOICE_SAMPL
                 return _open(int(r)), int(r), device_info
             except Exception:
                 continue
-        raise RuntimeError("No se pudo abrir el micrófono con ningún samplerate compatible.")
+        raise VoiceInputError("mic_open_failed", "No se pudo abrir el micrófono con ningún samplerate compatible.")
 
     # Probar candidatos hasta que uno abra de verdad (evita -9996/-9999)
     last_err = None
@@ -287,7 +299,8 @@ def record_until_stop(stop_event: threading.Event, samplerate: int = VOICE_SAMPL
             last_err = e
             continue
     if stream_ctx is None:
-        raise RuntimeError(
+        raise VoiceInputError(
+            "mic_open_failed",
             "No se pudo abrir el micrófono. "
             "Cierra apps que usen el micrófono (Chrome/Teams/Zoom) y prueba de nuevo. "
             "Si persiste, configura VOICE_INPUT_DEVICE en src/config.py (por ejemplo \"Intel\" o \"Realtek\")."
@@ -334,7 +347,8 @@ def record_until_stop(stop_event: threading.Event, samplerate: int = VOICE_SAMPL
 
         # Si tras normalizar sigue siendo casi silencio, fallar con mensaje accionable
         if audio.size and peak2 < 0.002:
-            raise RuntimeError(
+            raise VoiceInputError(
+                "mic_silent",
                 "No se detectó audio del micrófono (señal casi en cero). "
                 "Ve a Windows > Sonido > Entrada y selecciona el micrófono correcto. "
                 "Luego fija VOICE_INPUT_DEVICE en src/config.py con \"Intel\" o \"Realtek\"."
@@ -386,10 +400,26 @@ def transcribe_spanish(
     samplerate: int = VOICE_SAMPLE_RATE,
     model_name: Optional[str] = None,
 ) -> str:
+    """Compatibilidad: transcribe en espanol."""
+    return transcribe(audio, "es", samplerate=samplerate, model_name=model_name)
+
+
+def transcribe(
+    audio: np.ndarray,
+    language: str = "es",
+    samplerate: int = VOICE_SAMPLE_RATE,
+    model_name: Optional[str] = None,
+) -> str:
     """
-    Transcribe audio a texto en espanol. Descarga el modelo la primera vez.
+    Transcribe audio a texto en el idioma de aprendizaje indicado (es | en | pt).
+    Whisper recibe el idioma de forma explicita para que no traduzca ni mezcle
+    idiomas. Descarga el modelo la primera vez.
     """
     global _model
+    from src.languages import get_profile
+
+    profile = get_profile(language)
+    whisper_language = profile.whisper_language
     from faster_whisper import WhisperModel
 
     from src.config import (
@@ -412,11 +442,11 @@ def transcribe_spanish(
     if audio.size == 0:
         return ""
 
-    hotwords = load_hotwords()
-    hotwords_str, initial_prompt = _whisper_bias_strings(hotwords)
+    hotwords = load_hotwords(profile.code)
+    hotwords_str, initial_prompt = _whisper_bias_strings(hotwords, profile.code)
 
     base_kwargs = dict(
-        language="es",
+        language=whisper_language,
         beam_size=int(WHISPER_BEAM_SIZE),
         best_of=int(WHISPER_BEST_OF),
         vad_filter=False,
@@ -462,12 +492,12 @@ def transcribe_spanish(
         segments, _info = _transcribe_once(use_hotwords=False)
         text = _collect_text(segments)
     if text:
-        return _postprocess_spanish(text)
+        return _postprocess(text, profile.code)
 
     # Segundo intento (fallback ultra-permisivo). A veces faster-whisper decide "no speech"
     # por thresholds internos; este fallback fuerza a devolver algo si hay voz.
     fallback_kwargs = dict(
-        language="es",
+        language=whisper_language,
         beam_size=1,
         best_of=1,
         vad_filter=False,
@@ -478,9 +508,16 @@ def transcribe_spanish(
     )
     try:
         segments2, _info2 = _model.transcribe(audio, **fallback_kwargs)
-        return _postprocess_spanish(_collect_text(segments2))
+        return _postprocess(_collect_text(segments2), profile.code)
     except Exception:
         return ""
+
+
+def _postprocess(text: str, language: str) -> str:
+    """Correcciones propias de cada idioma (hoy solo existen para espanol)."""
+    if language == "es":
+        return _postprocess_spanish(text)
+    return (text or "").strip()
 
 
 def _postprocess_spanish(text: str) -> str:

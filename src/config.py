@@ -59,9 +59,42 @@ WEB_VIDEO_JPEG_QUALITY = 55        # 40-70 recomendado
 WEB_VIDEO_INTERVAL_MS = 45         # cada cuántos ms se envía un frame (45ms ≈ 22 FPS)
 
 # Interfaz
-APP_TITLE = "Traductor de Lenguaje de Senas"
+APP_TITLE = "Enseñando"
 WINDOW_MIN_WIDTH = 800
 WINDOW_MIN_HEIGHT = 600
+MAX_ATTEMPTS = 5
+
+# Idiomas disponibles para aprender lenguaje de señas: español, inglés, portugués.
+LEARNING_LANGUAGES = ("es", "en", "pt")
+DEFAULT_LEARNING_LANGUAGE = "es"
+
+# Alfabeto dactilologico y modelo ML por idioma de aprendizaje.
+# es usa LSC (Lengua de Senas Colombiana, modelo original); pt usa LIBRAS (Lingua
+# Brasileira de Sinais) y en usa ASL (American Sign Language), cada uno con su propio
+# dataset y modelo (se entrenan con: python collect_sign_samples.py --lang pt|en).
+# El dataset de ASL se arma reutilizando las letras equivalentes de LSC y LIBRAS:
+# python build_asl_dataset.py
+_SIGN_DATA_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "data",
+    "sign_language",
+)
+SIGN_ALPHABETS = {
+    "es": tuple("ABCDEFGHIJKLMNOPQRSTUVWXYZ"),
+    "en": tuple("ABCDEFGHIJKLMNOPQRSTUVWXYZ"),
+    "pt": tuple("ABCÇDEFGHIJKLMNOPQRSTUVWXYZ"),
+}
+SIGN_MODEL_FILES = {
+    "es": (SIGN_SAMPLES_CSV, SIGN_MODEL_PATH),
+    "en": (
+        os.path.join(_SIGN_DATA_DIR, "asl", "sign_samples.csv"),
+        os.path.join(_SIGN_DATA_DIR, "asl", "sign_classifier.joblib"),
+    ),
+    "pt": (
+        os.path.join(_SIGN_DATA_DIR, "libras", "sign_samples.csv"),
+        os.path.join(_SIGN_DATA_DIR, "libras", "sign_classifier.joblib"),
+    ),
+}
 
 # UI
 # True = interfaz web moderna (HTML/CSS) embebida con PyWebView

@@ -11,7 +11,7 @@ import ttkbootstrap as ttk
 class MainMenuScreen(ttk.Frame):
     """
     Menu principal: muestra nombre de usuario y botones
-    para ir a Traduccion o Cerrar sesion.
+    para acceder a todas las opciones de la aplicacion.
     """
 
     def __init__(
@@ -19,11 +19,17 @@ class MainMenuScreen(ttk.Frame):
         parent: tk.Misc,
         username: str,
         on_interaction: Callable[[], None],
+        on_translation: Callable[[], None],
+        on_voice: Callable[[], None],
+        on_aprendizaje: Callable[[], None],
         on_logout: Callable[[], None],
         **kwargs
     ) -> None:
         super().__init__(parent, **kwargs)
         self._on_interaction = on_interaction
+        self._on_translation = on_translation
+        self._on_voice = on_voice
+        self._on_aprendizaje = on_aprendizaje
         self._on_logout = on_logout
         self._username = username
         self._build_ui()
@@ -45,7 +51,7 @@ class MainMenuScreen(ttk.Frame):
 
         ttk.Button(
             card,
-            text="Iniciar interacción (Voz + Señas)",
+            text="Interacción (Voz + Señas)",
             command=self._on_interaction,
             bootstyle="primary",
             width=32,
@@ -53,8 +59,32 @@ class MainMenuScreen(ttk.Frame):
 
         ttk.Button(
             card,
+            text="Traducción en tiempo real",
+            command=self._on_translation,
+            bootstyle="info",
+            width=32,
+        ).grid(row=3, column=0, sticky="ew", pady=(0, 10))
+
+        ttk.Button(
+            card,
+            text="Voz a texto",
+            command=self._on_voice,
+            bootstyle="success",
+            width=32,
+        ).grid(row=4, column=0, sticky="ew", pady=(0, 10))
+
+        ttk.Button(
+            card,
+            text="Aprendizaje de señas",
+            command=self._on_aprendizaje,
+            bootstyle="warning",
+            width=32,
+        ).grid(row=5, column=0, sticky="ew", pady=(0, 20))
+
+        ttk.Button(
+            card,
             text="Cerrar sesión",
             command=self._on_logout,
             bootstyle="danger",
             width=32,
-        ).grid(row=3, column=0, sticky="ew")
+        ).grid(row=6, column=0, sticky="ew")

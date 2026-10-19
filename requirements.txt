@@ -1,4 +1,4 @@
-# Traductor Lenguaje de Senas - Dependencias
+# Enseñando - Dependencias
 # Python 3.8+
 # MediaPipe: se usa la API Tasks (mp.tasks.vision). Primera ejecucion del modulo de traduccion descarga el modelo.
 

@@ -1,5 +1,5 @@
 #!/bin/bash
-# Script de instalacion - Traductor de Lenguaje de Senas
+# Script de instalacion - Enseñando
 # Ejecutar desde la raiz del proyecto
 
 set -e

@@ -1,6 +1,8 @@
 #!/usr/bin/env python
 # collect_sign_samples.py
-# Recoleccion interactiva de muestras ASL (60 por letra) + entrenamiento del modelo.
+# Recoleccion interactiva de muestras (60 por letra) + entrenamiento del modelo.
+# Con --lang pt se graba el alfabeto de LIBRAS y con --lang en el de ASL,
+# cada uno en su propio dataset y modelo.
 #
 # Controles en la ventana:
 #   ENTER  = empezar a grabar la letra / pasar a la siguiente letra
@@ -12,6 +14,8 @@
 #   python collect_sign_samples.py
 #   python collect_sign_samples.py --from B
 #   python collect_sign_samples.py --only B --redo
+#   python collect_sign_samples.py --lang pt
+#   python collect_sign_samples.py --lang en --only F
 
 from __future__ import annotations
 
@@ -72,6 +76,11 @@ def _draw_overlay(frame, lines: list[str], bar_current: int, bar_total: int, let
         )
 
 
+def _cv_label(letter: str) -> str:
+    """Las fuentes de OpenCV solo dibujan ASCII: la Ç se muestra como texto."""
+    return "C-cedilha" if letter == "Ç" else letter
+
+
 def _status_lines(letter: str, collected: int, per_letter: int, phase: str) -> list[str]:
     if phase == _WAIT_START:
         if collected == 0:
@@ -102,7 +111,13 @@ def _status_lines(letter: str, collected: int, per_letter: int, phase: str) -> l
 
 
 def _parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description="Recolectar muestras ASL para entrenar el clasificador.")
+    p = argparse.ArgumentParser(description="Recolectar muestras de señas para entrenar el clasificador.")
+    p.add_argument(
+        "--lang",
+        choices=("es", "en", "pt"),
+        default="es",
+        help="Alfabeto a grabar: es = LSC, pt = LIBRAS, en = ASL (cada uno con su modelo).",
+    )
     p.add_argument(
         "--from",
         dest="start_letter",
@@ -130,7 +145,7 @@ def _parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = _parse_args()
-    clf = SignClassifier()
+    clf = SignClassifier(language=args.lang)
     per_letter = clf.samples_per_letter
 
     try:
@@ -139,22 +154,24 @@ def main() -> None:
     except Exception:
         sample_interval = 0.25
 
-    letters = list(SignClassifier.LETTERS)
+    # La Ç (LIBRAS) tiene la misma forma estatica que la C: no se graba como clase
+    # propia (confundiria al modelo); la app la detecta como C + movimiento.
+    letters = [l for l in clf.letters if l != "Ç"]
     if args.only_letter:
         letters = [args.only_letter.upper()]
     elif args.start_letter:
         start = args.start_letter.upper()
-        if start not in SignClassifier.LETTERS:
+        if start not in letters:
             print(f"Letra invalida: {start}")
             sys.exit(1)
-        idx = SignClassifier.LETTERS.index(start)
-        letters = SignClassifier.LETTERS[idx:]
+        letters = letters[letters.index(start):]
 
     if args.redo and letters:
         removed = clf.remove_samples_for_letter(letters[0])
         print(f"Borradas {removed} muestras de la letra {letters[0]}.")
 
-    print("=== Recoleccion de muestras ASL ===")
+    alphabet_name = {"es": "LSC", "pt": "LIBRAS", "en": "ASL"}[args.lang]
+    print(f"=== Recoleccion de muestras ({alphabet_name}) ===")
     print(f"CSV: {clf.samples_csv}")
     print(f"Muestras por letra: {per_letter}")
     print(f"Intervalo: {sample_interval}s entre muestras")
@@ -167,7 +184,7 @@ def main() -> None:
         sys.exit(1)
 
     detector = HandDetector()
-    window = "Recolectar senas ASL"
+    window = "Recolectar senas"
     cv2.namedWindow(window, cv2.WINDOW_NORMAL)
 
     last_sample_ts = 0.0
@@ -192,10 +209,10 @@ def main() -> None:
                 if landmarks is not None:
                     detector.draw_landmarks(frame_out, landmarks)
 
-                lines = _status_lines(letter, collected, per_letter, phase)
+                lines = _status_lines(_cv_label(letter), collected, per_letter, phase)
                 show_bar = phase in (_COLLECTING, _PAUSED, _LETTER_DONE)
                 bar_n = collected if phase != _LETTER_DONE else per_letter
-                _draw_overlay(frame_out, lines, bar_n, per_letter if show_bar else 0, letter)
+                _draw_overlay(frame_out, lines, bar_n, per_letter if show_bar else 0, _cv_label(letter))
 
                 if phase == _COLLECTING and landmarks is not None:
                     now = time.monotonic()

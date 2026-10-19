@@ -1,4 +1,4 @@
-# Traductor de Lenguaje de Senas (A-Z)
+# Enseñando
 
 Proyecto academico para la asignatura **Lenguajes y Paradigmas**. Aplicacion en Python que traduce letras del alfabeto espanol (A-Z) del lenguaje de senas a texto usando vision por computador con camara web.
 
@@ -48,7 +48,7 @@ En la misma carpeta (raiz del proyecto):
 python run.py
 ```
 
-Se abrira una ventana con el titulo "Traductor de Lenguaje de Senas".
+Se abrira una ventana con el titulo "Enseñando".
 
 ### Interfaz (UI)
 
@@ -81,6 +81,19 @@ Por defecto, la app usa una **interfaz moderna en HTML/CSS** embebida como escri
 6. Pulsa **Enviar señas** para mandarlo a la conversación como \"Persona (señas)\".
 7. En el panel de **Voz**, pulsa **Grabar**, habla y luego **Detener** para que el texto aparezca en la conversación como \"Yo (voz)\".
 7. Pulse **Volver** para regresar al menú (la cámara se apaga).
+
+### Alfabetos de señas (LSC, Libras y ASL)
+
+El idioma de aprendizaje elige el alfabeto y el modelo de reconocimiento, cada uno con sus propios datos:
+
+| Idioma | Alfabeto | Datos y modelo | Imágenes |
+|---|---|---|---|
+| Español | LSC (incluye Ñ) | `data/sign_language/` | `src/gui_web/web/assets/letras/` |
+| Portugués | Libras (incluye Ç) | `data/sign_language/libras/` | `src/gui_web/web/assets/letras/libras/` |
+| Inglés | ASL (26 letras) | `data/sign_language/asl/` | `src/gui_web/web/assets/letras/asl/` |
+
+ASL reutiliza las letras cuya seña es equivalente en LSC o Libras. Para rearmar su dataset, imágenes y modelo: `python build_asl_dataset.py`.
+Las letras propias de ASL (F, M, N, Q, T) se graban con `python collect_sign_samples.py --lang en --only F` (ver `src/gui_web/web/assets/letras/asl/README.md`).
 
 ### Mejorar nombres en voz (hotwords)
 
