@@ -3,15 +3,15 @@
   --yellow:#f9b95c;
   --mint:#96c7b3;
   --lagoon:#6398a9;
-  --color-correcto:#5e9f83;
-  --color-incorrecto:#c86f68;
+  --color-correcto:#3f9a72;
+  --color-incorrecto:#d0564d;
   --color-advertencia:#d79532;
   --color-principal:var(--lagoon);
   --color-secundario:var(--mint);
   --color-fondo:#fffaf2;
   --color-texto:#29404a;
-  --color-correcto-rgb:94,159,131;
-  --color-incorrecto-rgb:200,111,104;
+  --color-correcto-rgb:63,154,114;
+  --color-incorrecto-rgb:208,86,77;
   --color-advertencia-rgb:215,149,50;
   --color-principal-rgb:99,152,169;
   --color-secundario-rgb:150,199,179;
@@ -511,14 +511,14 @@ input:focus{border-color:var(--lagoon); background:#fff; box-shadow:0 0 0 4px rg
   text-align:center;
 }
 .learning-status-pill.learning-status-correct{
-  background:rgba(150,199,179,.3);
+  background:rgba(var(--color-correcto-rgb),.18);
   color:var(--color-correcto);
-  border-color:rgba(var(--color-correcto-rgb),.36);
+  border-color:rgba(var(--color-correcto-rgb),.55);
 }
 .learning-status-pill.learning-status-incorrect{
-  background:rgba(215,137,127,.18);
+  background:rgba(var(--color-incorrecto-rgb),.16);
   color:var(--color-incorrecto);
-  border-color:rgba(var(--color-incorrecto-rgb),.32);
+  border-color:rgba(var(--color-incorrecto-rgb),.55);
 }
 .learning-video-wrap{
   position:relative;
@@ -526,14 +526,14 @@ input:focus{border-color:var(--lagoon); background:#fff; box-shadow:0 0 0 4px rg
 }
 /* ===== INICIO: estilos del feedback de sena correcta/incorrecta ===== */
 .learning-video-wrap.learning-correct{
-  border:3px solid rgba(var(--color-correcto-rgb),.85);
-  box-shadow:0 0 0 4px rgba(var(--color-correcto-rgb),.18), 0 10px 30px rgba(var(--color-correcto-rgb),.18);
-  background:linear-gradient(180deg, rgba(var(--color-correcto-rgb),.05), rgba(var(--color-correcto-rgb),.02));
+  border:4px solid rgba(var(--color-correcto-rgb),.95);
+  box-shadow:0 0 0 5px rgba(var(--color-correcto-rgb),.28), 0 10px 30px rgba(var(--color-correcto-rgb),.28);
+  background:linear-gradient(180deg, rgba(var(--color-correcto-rgb),.10), rgba(var(--color-correcto-rgb),.04));
 }
 .learning-video-wrap.learning-incorrect{
-  border:3px solid rgba(var(--color-incorrecto-rgb),.85);
-  box-shadow:0 0 0 4px rgba(var(--color-incorrecto-rgb),.18), 0 10px 30px rgba(var(--color-incorrecto-rgb),.18);
-  background:linear-gradient(180deg, rgba(var(--color-incorrecto-rgb),.05), rgba(var(--color-incorrecto-rgb),.02));
+  border:4px solid rgba(var(--color-incorrecto-rgb),.95);
+  box-shadow:0 0 0 5px rgba(var(--color-incorrecto-rgb),.28), 0 10px 30px rgba(var(--color-incorrecto-rgb),.28);
+  background:linear-gradient(180deg, rgba(var(--color-incorrecto-rgb),.10), rgba(var(--color-incorrecto-rgb),.04));
 }
 .learning-overlay{
   position:absolute;
@@ -575,6 +575,47 @@ input:focus{border-color:var(--lagoon); background:#fff; box-shadow:0 0 0 4px rg
   80%{transform:translateX(-50%) translateX(5px)}
 }
 /* ===== FIN: estilos del feedback de sena correcta/incorrecta ===== */
+/* Aviso de letra que el modelo del idioma todavia no reconoce */
+.learning-notice{
+  font-weight:700;
+  font-size:14px;
+  color:var(--text);
+  background:rgba(234,179,8,.14);
+  border:1px solid rgba(234,179,8,.35);
+  padding:10px 14px;
+  border-radius:10px;
+}
+/* Mensaje de actividad completada (Aprendizaje / Repaso) */
+.learning-complete{
+  display:grid;
+  gap:8px;
+  justify-items:center;
+  text-align:center;
+  padding:14px 16px;
+  border-radius:14px;
+  background:rgba(var(--color-correcto-rgb),.12);
+  border:1px solid rgba(var(--color-correcto-rgb),.36);
+}
+.learning-complete strong{font-size:1.1rem; color:var(--color-correcto)}
+.learning-complete p{margin:0}
+/* Pregunta de la IA tras varios errores en la misma letra */
+.learning-error-prompt{
+  display:grid;
+  gap:8px;
+  padding:14px 16px;
+  border-radius:14px;
+  background:var(--card);
+  border:1px solid rgba(var(--color-incorrecto-rgb),.4);
+  box-shadow:0 10px 26px rgba(var(--color-incorrecto-rgb),.14);
+  animation:riseIn .25s ease both;
+}
+.learning-error-prompt p{margin:0}
+.learning-error-prompt-head{display:flex; align-items:center; justify-content:space-between; gap:10px}
+.learning-error-prompt-message{font-weight:700; line-height:1.45}
+.learning-error-prompt-status{font-size:13px; font-weight:700; color:var(--color-incorrecto)}
+.learning-error-prompt-actions{display:flex; flex-wrap:wrap; gap:8px}
+.learning-error-prompt-actions .btn{flex:1 1 180px; margin-top:0}
+.learning-error-prompt-actions .btn:disabled{cursor:default; opacity:.75}
 .learning-counter{
   font-weight:800;
   font-size:14px;
@@ -818,6 +859,12 @@ input:focus{border-color:var(--lagoon); background:#fff; box-shadow:0 0 0 4px rg
   background:var(--success);
   color:white;
   border-color:transparent;
+}
+/* Letra que la persona decidio pasar sin completar */
+.reto-letter-tile.passed{
+  background:rgba(var(--color-incorrecto-rgb),.14);
+  color:var(--color-incorrecto);
+  border-color:rgba(var(--color-incorrecto-rgb),.45);
 }
 .reto-letter-tile.current{
   background:var(--primary);

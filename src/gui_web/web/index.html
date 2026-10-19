@@ -407,6 +407,28 @@
                 </div>
                 <div class="learning-caption" id="learningCaption" data-i18n="repeatSign">Repite la seña</div>
                 <div class="learning-counter" id="learningCounter">Correctas: 0</div>
+                <div class="learning-notice hidden" id="learningNotice" role="status"></div>
+                <!-- Tras varios errores en la misma letra, la IA ofrece guardarla para Repaso -->
+                <div class="learning-error-prompt hidden" id="learningErrorPrompt" role="alertdialog" aria-labelledby="learningErrorPromptMessage">
+                  <div class="learning-error-prompt-head">
+                    <strong data-i18n="aiAssistant">🤖 Asistente IA</strong>
+                    <button class="btn ghost speak-btn" type="button" data-speak-target="learningErrorPromptMessage,learningErrorPromptQuestion" data-i18n="speak" data-i18n-aria="speakAria">🔊 Escuchar</button>
+                  </div>
+                  <p class="learning-error-prompt-message" id="learningErrorPromptMessage"></p>
+                  <p class="muted" id="learningErrorPromptQuestion" data-i18n="errorPromptQuestion">¿Qué quieres hacer ahora?</p>
+                  <p class="learning-error-prompt-status hidden" id="learningErrorPromptStatus" role="status"></p>
+                  <div class="learning-error-prompt-actions">
+                    <button class="btn ai-favorite-action" id="learningErrorPromptSave" type="button">⭐ Guardar para repasar</button>
+                    <button class="btn" id="learningErrorPromptKeep" type="button" data-i18n="keepPracticing">🔁 Seguir practicando esta letra</button>
+                    <button class="btn primary" id="learningErrorPromptNext" type="button" data-i18n="nextLetter">Pasar a la siguiente letra →</button>
+                  </div>
+                </div>
+                </div>
+                <div class="learning-complete hidden" id="learningComplete" role="status" aria-live="polite">
+                  <strong id="learningCompleteTitle"></strong>
+                  <p class="muted" data-i18n="learningCompleteText">Puedes empezar de nuevo o repasar letras con Anterior y Siguiente.</p>
+                  <button class="btn primary" id="btnLearningRestart" type="button" data-i18n="restartAlphabet">Empezar de nuevo</button>
+                </div>
                 <div class="learning-actions">
                   <button class="btn" id="btnPrevAprendizaje" data-i18n="prev">Anterior</button>
                   <button class="btn primary" id="btnNextAprendizaje" data-i18n="next">Siguiente</button>
@@ -608,6 +630,27 @@
                   <div class="learning-overlay" id="repasoOverlay"></div>
                 </div>
                 <div class="learning-caption" id="repasoCaption" data-i18n="repeatSign">Repite la seña</div>
+                <div class="learning-notice hidden" id="repasoNotice" role="status"></div>
+                <!-- Tras varios errores en la misma letra, la IA pregunta si seguir con ella o pasar a la siguiente -->
+                <div class="learning-error-prompt hidden" id="repasoErrorPrompt" role="alertdialog" aria-labelledby="repasoErrorPromptMessage">
+                  <div class="learning-error-prompt-head">
+                    <strong data-i18n="aiAssistant">🤖 Asistente IA</strong>
+                    <button class="btn ghost speak-btn" type="button" data-speak-target="repasoErrorPromptMessage,repasoErrorPromptQuestion" data-i18n="speak" data-i18n-aria="speakAria">🔊 Escuchar</button>
+                  </div>
+                  <p class="learning-error-prompt-message" id="repasoErrorPromptMessage"></p>
+                  <p class="muted" id="repasoErrorPromptQuestion" data-i18n="errorPromptQuestion">¿Qué quieres hacer ahora?</p>
+                  <p class="learning-error-prompt-status hidden" id="repasoErrorPromptStatus" role="status"></p>
+                  <div class="learning-error-prompt-actions">
+                    <button class="btn ai-favorite-action" id="repasoErrorPromptSave" type="button">⭐ Guardar para repasar</button>
+                    <button class="btn" id="repasoErrorPromptKeep" type="button" data-i18n="keepPracticing">🔁 Seguir practicando esta letra</button>
+                    <button class="btn primary" id="repasoErrorPromptNext" type="button" data-i18n="nextLetter">Pasar a la siguiente letra →</button>
+                  </div>
+                </div>
+                <div class="learning-complete hidden" id="repasoComplete" role="status" aria-live="polite">
+                  <strong data-i18n="repasoCompleteTitle">🎉 ¡Repasaste todas tus letras favoritas!</strong>
+                  <p class="muted" data-i18n="repasoCompleteText">Puedes repetir el repaso o practicar una letra con Anterior y Siguiente.</p>
+                  <button class="btn primary" id="btnRepasoRestart" type="button" data-i18n="restartRepaso">Repetir repaso</button>
+                </div>
                 <div class="learning-actions">
                   <button class="btn" id="btnPrevRepaso" data-i18n="prev">Anterior</button>
                   <button class="btn primary" id="btnNextRepaso" data-i18n="next">Siguiente</button>
@@ -676,17 +719,33 @@
 
             <div class="panel card learning-panel right-panel">
               <div class="camera-box">
-                <div class="video-wrap learning-video-wrap">
+                <div class="video-wrap learning-video-wrap" id="retoVideoWrap">
                   <img id="videoReto" alt="camara del reto" />
                   <div class="video-fallback" id="videoFallbackReto">Iniciando cámara…</div>
                   <div class="camera-status camera-status-active" aria-live="polite">
                     <strong data-i18n="cameraActive">Cámara activa</strong>
                     <span data-i18n="cameraActiveHint">Coloca tu mano frente a la cámara.</span>
                   </div>
+                  <div class="learning-overlay" id="retoOverlay"></div>
                 </div>
                 <div class="learning-caption" id="retoCaption">Haz la seña de la letra</div>
                 <div class="reto-progress-track">
                   <div class="reto-progress-fill" id="retoProgressFill"></div>
+                </div>
+                <!-- Tras varios errores en la misma letra, el reto se pausa y la IA pregunta que hacer -->
+                <div class="learning-error-prompt hidden" id="retoErrorPrompt" role="alertdialog" aria-labelledby="retoErrorPromptMessage">
+                  <div class="learning-error-prompt-head">
+                    <strong data-i18n="aiAssistant">🤖 Asistente IA</strong>
+                    <button class="btn ghost speak-btn" type="button" data-speak-target="retoErrorPromptMessage,retoErrorPromptQuestion" data-i18n="speak" data-i18n-aria="speakAria">🔊 Escuchar</button>
+                  </div>
+                  <p class="learning-error-prompt-message" id="retoErrorPromptMessage"></p>
+                  <p class="muted" id="retoErrorPromptQuestion" data-i18n="errorPromptQuestion">¿Qué quieres hacer ahora?</p>
+                  <p class="learning-error-prompt-status hidden" id="retoErrorPromptStatus" role="status"></p>
+                  <div class="learning-error-prompt-actions">
+                    <button class="btn ai-favorite-action" id="retoErrorPromptSave" type="button">⭐ Guardar para repasar</button>
+                    <button class="btn" id="retoErrorPromptKeep" type="button" data-i18n="keepPracticing">🔁 Seguir practicando esta letra</button>
+                    <button class="btn primary" id="retoErrorPromptNext" type="button" data-i18n="nextLetter">Pasar a la siguiente letra →</button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -701,6 +760,7 @@
               <div class="reto-complete-emoji">🎉</div>
               <h3 data-i18n="retoCompleteTitle">¡Completaste el reto!</h3>
               <p class="muted" id="retoCompleteText">Deletreaste tu nombre correctamente en señas.</p>
+              <p class="muted hidden" id="retoCompletePassed"></p>
               <div class="row">
                 <button class="btn primary" id="btnRetoRetry" data-i18n="retry">Reintentar</button>
                 <button class="btn" id="btnRetoMenu" data-i18n="menuReturn">Volver al menú</button>
@@ -717,7 +777,7 @@
       (function(){
         function refreshStudyStreak(){
           if(!window.pywebview || !window.pywebview.api || !window.pywebview.api.get_state) return;
-          window.pywebview.api.get_state().then(function(state){
+          window.pywebview.api.get_state(false).then(function(state){
             var indicator = document.getElementById("studyStreak");
             if(!indicator || !state || !state.logged_in || !state.study_streak) return;
             var current = Number(state.study_streak.current_streak) || 0;

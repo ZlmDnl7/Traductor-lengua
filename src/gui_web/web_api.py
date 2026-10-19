@@ -114,6 +114,12 @@ class WebAPI:
         self._c.on_challenge_stop()
         return {"ok": True}
 
+    def challenge_keep_practicing(self) -> Dict[str, Any]:
+        return self._c.on_challenge_keep_practicing()
+
+    def challenge_next_letter(self) -> Dict[str, Any]:
+        return self._c.on_challenge_next_letter()
+
     # ===== Desempeno de aprendizaje =====
     def learning_attempt(self, target_letter: str, detected_letter: str) -> Dict[str, Any]:
         return self._c.web_learning_attempt(target_letter, detected_letter)
@@ -141,12 +147,15 @@ class WebAPI:
         return self._c.web_stop_evaluation()
 
     # ===== Poll =====
-    def get_state(self) -> Dict[str, Any]:
+    def get_state(self, consume_messages: bool = True) -> Dict[str, Any]:
+        # Solo el poll principal del chat consume los mensajes nuevos; otras
+        # consultas (racha, reto) pasan False para no "robarlos" del chat.
         st = self._c.get_web_state()
         msgs = st.get("messages", [])
         new_msgs = msgs[self._last_msg_idx :]
-        self._last_msg_idx = len(msgs)
+        if consume_messages:
+            self._last_msg_idx = len(msgs)
         st = dict(st)
-        st["new_messages"] = new_msgs
+        st["new_messages"] = new_msgs if consume_messages else []
         return st
 

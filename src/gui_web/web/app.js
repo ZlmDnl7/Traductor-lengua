@@ -65,6 +65,10 @@ const learningDetected = $("learningDetected");
 const learningStatusPill = $("learningStatusPill");
 const learningCaption = $("learningCaption");
 const learningCounter = $("learningCounter");
+const learningNotice = $("learningNotice");
+const learningComplete = $("learningComplete");
+const learningCompleteTitle = $("learningCompleteTitle");
+const retoCompletePassed = $("retoCompletePassed");
 const btnStarLetter = $("btnStarLetter");
 const starIcon = $("starIcon");
 const learningDifficultCount = $("learningDifficultCount");
@@ -103,6 +107,8 @@ const repasoOverlay = $("repasoOverlay");
 const videoRepaso = $("videoRepaso");
 const videoFallbackRepaso = $("videoFallbackRepaso");
 const btnUnstarRepaso = $("btnUnstarRepaso");
+const repasoNotice = $("repasoNotice");
+const repasoComplete = $("repasoComplete");
 // Asistente IA de Repaso
 const repasoAssistantCard = $("repasoAssistantCard");
 const repasoAssistantTitle = $("repasoAssistantTitle");
@@ -119,6 +125,8 @@ const retoLetter = $("retoLetter");
 const retoReferenceArt = $("retoReferenceArt");
 const retoReferenceImage = $("retoReferenceImage");
 const retoCaption = $("retoCaption");
+const retoVideoWrap = $("retoVideoWrap");
+const retoOverlay = $("retoOverlay");
 const retoSubtitle = $("retoSubtitle");
 const retoProgressFill = $("retoProgressFill");
 const retoEmpty = $("retoEmpty");
@@ -308,6 +316,100 @@ function showReferenceImage(img, art, letter){
   if(placeholder) placeholder.style.display = "none";
 }
 
+// ===== Avance automatico (Aprendizaje y Repaso) =====
+// Al confirmar la seña correcta se muestra "Correcto" y, tras este tiempo, se
+// pasa a la letra siguiente. El Reto hace lo mismo en el backend.
+const AUTO_ADVANCE_DELAY_MS = 1000;
+// Letras que el modelo del idioma activo puede reconocer (las envía el backend
+// en cada get_state). null = todavía no se conocen.
+let recognizableLetters = null;
+
+function isRecognizable(letter){
+  return !recognizableLetters || recognizableLetters.includes(letter);
+}
+
+// Avisa cuando el modelo del idioma todavía no reconoce la letra: en ese caso
+// el avance es manual (botón Siguiente) y nunca se simula una detección.
+function renderLetterNotice(el, letter){
+  if(!el) return;
+  const missing = !!letter && !isRecognizable(letter);
+  el.classList.toggle("hidden", !missing);
+  el.textContent = missing ? tr("letterNotRecognized", letter, signLanguageName()) : "";
+}
+
+// ===== Pregunta de la IA tras varios errores (Aprendizaje, Repaso y Reto) =====
+// Tras ERRORS_TO_PROMPT intentos equivocados en la misma letra, la IA ofrece
+// guardarla para Repaso y deja elegir entre seguir con ella o pasar a la
+// siguiente. Mientras la pregunta está abierta la detección queda en pausa.
+const ERRORS_TO_PROMPT = 4;
+const errorPrompts = [];
+
+function createErrorPrompt(prefix, { onKeep, onNext }){
+  const root = $(`${prefix}ErrorPrompt`);
+  const message = $(`${prefix}ErrorPromptMessage`);
+  const status = $(`${prefix}ErrorPromptStatus`);
+  const saveBtn = $(`${prefix}ErrorPromptSave`);
+  const prompt = {
+    open: false,
+    letter: null,
+    errors: 0,
+    render(){
+      const saved = favoriteLetters.has(this.letter);
+      message.textContent = saved
+        ? tr("errorPromptAlreadySaved", this.letter, this.errors)
+        : tr("errorPromptMessage", this.letter, this.errors);
+      saveBtn.textContent = saved ? tr("errorPromptSaved") : tr("errorPromptSave");
+      saveBtn.disabled = saved;
+      saveBtn.setAttribute("aria-pressed", saved ? "true" : "false");
+    },
+    show(letter, errors){
+      this.open = true;
+      this.letter = letter;
+      this.errors = errors;
+      status.classList.add("hidden");
+      status.textContent = "";
+      this.render();
+      root.classList.remove("hidden");
+    },
+    hide(){
+      this.open = false;
+      root.classList.add("hidden");
+    },
+    // Solo agrega la letra a Repaso (nunca la quita) y confirma con el backend.
+    async save(){
+      const letter = this.letter;
+      saveBtn.disabled = true;
+      let saved = false;
+      try{
+        const result = await window.pywebview.api.set_favorite_letter(letter, true);
+        if(result && result.ok){
+          favoriteLetters = new Set(result.letters || []);
+          saved = favoriteLetters.has(letter);
+          updateDifficultCount();
+          updateStarButton(learningTargetLetter);
+          updateAssistantFavoriteButton(learningTargetLetter);
+        }
+      }catch(e){
+        saved = false;
+      }
+      if(!this.open || this.letter !== letter) return;
+      this.render();
+      status.classList.toggle("hidden", saved);
+      status.textContent = saved ? "" : tr("errorPromptSaveFailed");
+    },
+  };
+  saveBtn.onclick = () => prompt.save();
+  $(`${prefix}ErrorPromptKeep`).onclick = onKeep;
+  $(`${prefix}ErrorPromptNext`).onclick = onNext;
+  errorPrompts.push(prompt);
+  return prompt;
+}
+
+// Los favoritos cambiaron (estrella, asistente, otro módulo): actualiza el texto.
+function refreshOpenErrorPrompts(){
+  errorPrompts.forEach((p) => { if(p.open) p.render(); });
+}
+
 // --- Favoritos del usuario autenticado (separados por idioma) ---
 let favoriteLetters = new Set();
 let favoriteUsername = null;
@@ -354,6 +456,7 @@ async function refreshFavoriteLetters(){
     updateDifficultCount();
     updateStarButton(learningTargetLetter);
     updateAssistantFavoriteButton(learningTargetLetter);
+    refreshOpenErrorPrompts();
     if(currentView() === "repaso") syncRepasoView();
   }catch(e){
     // Conserva los favoritos ya cargados si la consulta falla.
@@ -371,6 +474,7 @@ async function toggleFavoriteLetter(letter){
     updateDifficultCount();
     updateStarButton(target);
     updateAssistantFavoriteButton(target);
+    refreshOpenErrorPrompts();
     if(currentView() === "repaso") syncRepasoView();
   }catch(e){
     // No cambia la UI si el guardado no fue confirmado por el backend.
@@ -388,6 +492,13 @@ let repasoIsCorrect = false;
 let repasoAttemptLogged = false;
 let repasoAwaitingNewAttempt = false;
 let repasoResetTimer = null;
+let repasoAdvanceTimer = null;
+// Letra recién confirmada: se ignora hasta que la mano cambie o se retire.
+let repasoReleaseLetter = null;
+// Letras acertadas en la ronda actual; al cubrir todas se muestra el final.
+let repasoCompletedLetters = new Set();
+let repasoCompleted = false;
+let repasoErrorCount = 0;
 const REPASO_STREAK_TO_CONFIRM = 3;
 
 function buildRepasoList(){
@@ -403,6 +514,15 @@ function resetRepasoFeedback(){
     clearTimeout(repasoResetTimer);
     repasoResetTimer = null;
   }
+  if(repasoAdvanceTimer){
+    clearTimeout(repasoAdvanceTimer);
+    repasoAdvanceTimer = null;
+  }
+  repasoReleaseLetter = null;
+  repasoCompleted = false;
+  if(repasoComplete) repasoComplete.classList.add("hidden");
+  repasoErrorCount = 0;
+  repasoPrompt.hide();
   repasoIsCorrect = false;
   repasoAttemptLogged = false;
   repasoAwaitingNewAttempt = false;
@@ -467,9 +587,69 @@ function syncRepasoView(){
     showReferenceImage(repasoReferenceImage, repasoReferenceArt, letterValue);
   }
   renderSignInstructions($("repasoInstructions"), letterValue);
+  renderLetterNotice(repasoNotice, letterValue);
 
   resetRepasoFeedback();
 }
+
+function startRepasoRound(){
+  repasoCompletedLetters = new Set();
+}
+
+function showRepasoComplete(){
+  repasoCompleted = true;
+  // La ronda terminó: la siguiente práctica empieza una ronda nueva.
+  startRepasoRound();
+  if(repasoComplete) repasoComplete.classList.remove("hidden");
+  if(repasoCaption) repasoCaption.textContent = tr("repasoCompleteTitle");
+}
+
+// Tras ~1 s pasa a la siguiente letra favorita pendiente de la ronda (solo
+// letras que el modelo reconoce) o muestra el mensaje de finalización.
+function scheduleRepasoAdvance(){
+  const confirmed = repasoTargetLetter;
+  repasoCompletedLetters.add(confirmed);
+  if(repasoAdvanceTimer) clearTimeout(repasoAdvanceTimer);
+  repasoAdvanceTimer = setTimeout(() => {
+    repasoAdvanceTimer = null;
+    if(currentView() !== "repaso" || repasoTargetLetter !== confirmed) return;
+    goToNextPendingRepaso(confirmed);
+  }, AUTO_ADVANCE_DELAY_MS);
+}
+
+// Siguiente letra pendiente de la ronda o, si no queda ninguna, el final.
+function goToNextPendingRepaso(releaseLetter){
+  const isPending = (l) => !repasoCompletedLetters.has(l) && isRecognizable(l);
+  if(!repasoList.some(isPending)){
+    showRepasoComplete();
+    return;
+  }
+  for(let step = 1; step <= repasoList.length; step++){
+    const i = (repasoIndex + step) % repasoList.length;
+    if(isPending(repasoList[i])){
+      repasoIndex = i;
+      break;
+    }
+  }
+  syncRepasoView();
+  repasoReleaseLetter = releaseLetter || null;
+}
+
+const repasoPrompt = createErrorPrompt("repaso", {
+  // El aviso "otro intento" ya exige cambiar la seña antes de contar de nuevo.
+  onKeep: () => {
+    repasoPrompt.hide();
+    repasoErrorCount = 0;
+  },
+  // La letra pasada cuenta como vista en esta ronda (no como acertada).
+  onNext: () => {
+    const skipped = repasoTargetLetter;
+    repasoPrompt.hide();
+    repasoErrorCount = 0;
+    repasoCompletedLetters.add(skipped);
+    goToNextPendingRepaso(repasoLastDetected !== skipped ? repasoLastDetected : null);
+  },
+});
 
 function moveRepaso(step){
   if(repasoList.length === 0) return;
@@ -487,6 +667,7 @@ async function openRepasoForLetter(letter){
     updateDifficultCount();
     repasoInitialLetter = target;
     repasoIndex = 0;
+    startRepasoRound();
     setView("repaso");
     syncRepasoView();
   }catch(e){
@@ -551,6 +732,8 @@ function logRepasoAttempt(detectedLetter){
         repasoAttemptLogged = false;
         repasoAwaitingNewAttempt = true;
         showRepasoRetry(result.review_attempt, result.review_attempt_limit);
+        repasoErrorCount += 1;
+        if(repasoErrorCount === ERRORS_TO_PROMPT) repasoPrompt.show(target, repasoErrorCount);
       }
     }else{
       repasoAttemptLogged = false;
@@ -566,12 +749,22 @@ function updateRepasoFeedback(detectedLetterRaw){
     repasoDetected.textContent = detected || "-";
   }
   if(!repasoTargetLetter) return;
+  // Avance en curso, ronda terminada o pregunta de la IA abierta:
+  // ninguna detección cuenta como intento.
+  if(repasoAdvanceTimer || repasoCompleted || repasoPrompt.open) return;
 
   if(!detected){
     repasoSameStreak = 0;
     repasoLastDetected = null;
     repasoAwaitingNewAttempt = false;
+    repasoReleaseLetter = null;
     return;
+  }
+
+  // La seña recién confirmada sigue en cámara: no es un intento de la letra nueva.
+  if(repasoReleaseLetter){
+    if(detected === repasoReleaseLetter) return;
+    repasoReleaseLetter = null;
   }
 
   // Tras un error, exigir que el usuario cambie o retire la mano antes de
@@ -601,6 +794,7 @@ function updateRepasoFeedback(detectedLetterRaw){
     if(!repasoIsCorrect){
       repasoIsCorrect = true;
       logRepasoAttempt(detected);
+      scheduleRepasoAdvance();
     }
     if(repasoVideoWrap){
       repasoVideoWrap.classList.add("learning-correct");
@@ -616,7 +810,8 @@ function updateRepasoFeedback(detectedLetterRaw){
       repasoStatusPill.textContent = tr("correctExcl");
     }
     if(repasoCaption){
-      repasoCaption.textContent = tr("wellDoneNext");
+      const morePending = repasoList.some((l) => l !== repasoTargetLetter && !repasoCompletedLetters.has(l) && isRecognizable(l));
+      repasoCaption.textContent = morePending ? tr("correctAdvancing") : tr("correctExcl");
     }
   }else if(!isMatch && repasoSameStreak >= REPASO_STREAK_TO_CONFIRM){
     repasoIsCorrect = false;
@@ -651,6 +846,13 @@ let learningLastDetected = null;
 let learningIsCorrect = false;
 let learningAttemptLogged = false;
 let learningAnalysis = null;
+let learningAdvanceTimer = null;
+// Letra recién confirmada: se ignora hasta que la mano cambie o se retire.
+let learningReleaseLetter = null;
+let learningCompleted = false;
+// Errores confirmados en la letra actual; al llegar al limite la IA pregunta
+// si se guarda para Repaso y si seguir con la letra o pasar a la siguiente.
+let learningErrorCount = 0;
 let accessibilitySettingsDirty = false;
 let retoMode = "name";
 const LEARNING_STREAK_TO_CONFIRM = 3;
@@ -751,6 +953,14 @@ function renderReto(st){
   retoSkipped.classList.toggle("hidden", skipped.length === 0);
   retoSkipped.textContent = skipped.length ? tr("retoSkipped", skipped.join(", ")) : "";
 
+  // El backend pausa el reto tras varios errores y espera la decisión.
+  const target = letters[idx];
+  if(st.challenge_error_prompt && !done && target){
+    if(!retoPrompt.open || retoPrompt.letter !== target) retoPrompt.show(target, st.challenge_error_count);
+  }else if(retoPrompt.open){
+    retoPrompt.hide();
+  }
+
   if(letters.length === 0){
     retoEmpty.textContent = tr("retoEmpty");
     retoEmpty.classList.remove("hidden");
@@ -762,34 +972,46 @@ function renderReto(st){
   retoEmpty.classList.add("hidden");
   retoWord.classList.remove("hidden");
 
+  const passed = Array.isArray(st.challenge_passed) ? st.challenge_passed : [];
   retoWord.innerHTML = "";
   letters.forEach((l, i) => {
     const tile = document.createElement("div");
     let cls = "reto-letter-tile";
-    if(i < idx || done) cls += " done";
+    if(passed.includes(i)) cls += " passed";
+    else if(i < idx || done) cls += " done";
     else if(i === idx) cls += " current";
     tile.className = cls;
     tile.textContent = l;
     retoWord.appendChild(tile);
   });
 
+  const confirmed = !!st.challenge_confirmed && !done;
+  retoVideoWrap.classList.toggle("learning-correct", confirmed);
+  retoOverlay.classList.toggle("learning-overlay-correct", confirmed);
+  retoOverlay.textContent = confirmed ? tr("correct") : "";
+
   if(done){
     retoGrid.classList.add("hidden");
     retoComplete.classList.remove("hidden");
     retoSubtitle.textContent = mode === "word" ? tr("wordComplete") : tr("nameComplete");
     retoCompleteText.textContent = mode === "word" ? tr("retoCompleteWord", word) : tr("retoCompleteName");
+    const passedLetters = passed.map((i) => letters[i]).filter(Boolean);
+    retoCompletePassed.classList.toggle("hidden", passedLetters.length === 0);
+    retoCompletePassed.textContent = passedLetters.length ? tr("retoPassedLetters", passedLetters.join(", ")) : "";
     return;
   }
 
   retoGrid.classList.remove("hidden");
   retoComplete.classList.add("hidden");
 
-  const target = letters[idx];
   retoLetter.textContent = target;
   showReferenceImage(retoReferenceImage, retoReferenceArt, target);
   renderSignInstructions($("retoInstructions"), target);
   renderRetoHint(st.challenge_feedback, target);
-  retoCaption.textContent = tr("retoCaption", target);
+  // El backend confirma la letra y avanza solo ~1 s después.
+  retoCaption.textContent = confirmed
+    ? (idx === letters.length - 1 ? tr("correctExcl") : tr("correctAdvancing"))
+    : tr("retoCaption", target);
   retoSubtitle.textContent = tr("retoLetterOf", idx + 1, letters.length);
 
   const progress = Math.max(0, Math.min(1, st.challenge_progress || 0));
@@ -821,6 +1043,15 @@ function renderFrame(frameB64, videoEl, fallbackEl, errorMsg){
 }
 
 function resetLearningFeedback(){
+  if(learningAdvanceTimer){
+    clearTimeout(learningAdvanceTimer);
+    learningAdvanceTimer = null;
+  }
+  learningReleaseLetter = null;
+  learningCompleted = false;
+  if(learningComplete) learningComplete.classList.add("hidden");
+  learningErrorCount = 0;
+  learningPrompt.hide();
   learningIsCorrect = false;
   learningAttemptLogged = false;
   learningSameStreak = 0;
@@ -896,6 +1127,7 @@ function syncLearningView(letter, progressText){
 
   showReferenceImage(learningReferenceImage, learningReferenceArt, letterValue);
   renderSignInstructions($("learningInstructions"), letterValue);
+  renderLetterNotice(learningNotice, letterValue);
 
   updateStarButton(letterValue);
   updateAssistantFavoriteButton(letterValue);
@@ -903,13 +1135,75 @@ function syncLearningView(letter, progressText){
   if(lastLoggedIn) refreshLearningAssistant(letterValue);
 }
 
+// Sigue en la misma letra con un contador de errores nuevo. La seña equivocada
+// que siga en camara no cuenta hasta que la mano cambie o se retire.
+function keepPracticingLearningLetter(){
+  const lastWrong = learningLastDetected;
+  learningPrompt.hide();
+  learningErrorCount = 0;
+  learningSameStreak = 0;
+  learningLastDetected = null;
+  learningReleaseLetter = lastWrong && lastWrong !== learningTargetLetter ? lastWrong : null;
+  if(learningVideoWrap) learningVideoWrap.classList.remove("learning-correct", "learning-incorrect");
+  if(learningOverlay){
+    learningOverlay.classList.remove("learning-overlay-correct", "learning-overlay-incorrect");
+    learningOverlay.textContent = "";
+  }
+  if(learningStatusPill){
+    learningStatusPill.className = "learning-status-pill";
+    learningStatusPill.textContent = tr("waitingSign");
+  }
+  if(learningCaption) learningCaption.textContent = tr("repeatSign");
+}
+
+const learningPrompt = createErrorPrompt("learning", {
+  onKeep: keepPracticingLearningLetter,
+  onNext: () => {
+    learningIndex = LETTERS.indexOf(learningTargetLetter);
+    moveLearning(1);
+  },
+});
+
+function isLastLearningLetter(){
+  return LETTERS.indexOf(learningTargetLetter) === LETTERS.length - 1;
+}
+
+function showLearningComplete(){
+  learningCompleted = true;
+  if(learningCompleteTitle) learningCompleteTitle.textContent = tr("learningCompleteTitle", signLanguageName());
+  if(learningComplete) learningComplete.classList.remove("hidden");
+  if(learningCaption) learningCaption.textContent = tr("learningCompleteTitle", signLanguageName());
+}
+
+// Tras ~1 s pasa a la letra siguiente (una sola vez por confirmación) o, en la
+// última letra del abecedario, muestra el mensaje de finalización.
+function scheduleLearningAdvance(){
+  const confirmed = learningTargetLetter;
+  if(learningAdvanceTimer) clearTimeout(learningAdvanceTimer);
+  learningAdvanceTimer = setTimeout(() => {
+    learningAdvanceTimer = null;
+    if(currentView() !== "aprendizaje" || learningTargetLetter !== confirmed) return;
+    if(isLastLearningLetter()){
+      showLearningComplete();
+      return;
+    }
+    learningIndex = LETTERS.indexOf(confirmed);
+    moveLearning(1);
+    learningReleaseLetter = confirmed;
+  }, AUTO_ADVANCE_DELAY_MS);
+}
+
 function updateLearningFeedback(detectedLetterRaw){
   const detected = (detectedLetterRaw && String(detectedLetterRaw).trim()) ? String(detectedLetterRaw).trim().toUpperCase() : null;
   if(learningDetected){
     learningDetected.textContent = detected || "-";
   }
+  // Avance en curso, abecedario terminado o pregunta de la IA abierta:
+  // ninguna detección cuenta como intento.
+  if(learningAdvanceTimer || learningCompleted || learningPrompt.open) return;
 
   if(!detected){
+    learningReleaseLetter = null;
     learningSameStreak = 0;
     learningLastDetected = null;
     if(!learningIsCorrect){
@@ -931,6 +1225,12 @@ function updateLearningFeedback(detectedLetterRaw){
     return;
   }
 
+  // La seña recién confirmada sigue en cámara: no es un intento de la letra nueva.
+  if(learningReleaseLetter){
+    if(detected === learningReleaseLetter) return;
+    learningReleaseLetter = null;
+  }
+
   if(detected === learningLastDetected){
     learningSameStreak += 1;
   }else{
@@ -949,6 +1249,7 @@ function updateLearningFeedback(detectedLetterRaw){
       if(learningCounter){
         learningCounter.textContent = tr("correctCount", learningCorrectCount);
       }
+      scheduleLearningAdvance();
     }
     if(learningVideoWrap){
       learningVideoWrap.classList.add("learning-correct");
@@ -964,7 +1265,7 @@ function updateLearningFeedback(detectedLetterRaw){
       learningStatusPill.textContent = tr("correct");
     }
     if(learningCaption){
-      learningCaption.textContent = tr("wellDoneNext");
+      learningCaption.textContent = isLastLearningLetter() ? tr("correctExcl") : tr("correctAdvancing");
     }
   }else if(!isMatch && learningSameStreak >= LEARNING_STREAK_TO_CONFIRM){
     learningIsCorrect = false;
@@ -984,6 +1285,12 @@ function updateLearningFeedback(detectedLetterRaw){
     }
     if(learningCaption){
       learningCaption.textContent = tr("lookForSign", learningTargetLetter);
+    }
+    // Cada intento equivocado cuenta una sola vez: al confirmarse (no en cada
+    // frame que la misma seña siga en camara).
+    if(learningSameStreak === LEARNING_STREAK_TO_CONFIRM){
+      learningErrorCount += 1;
+      if(learningErrorCount === ERRORS_TO_PROMPT) learningPrompt.show(learningTargetLetter, learningErrorCount);
     }
   }
   // ===== FIN: identifica si la letra es correcta y pinta el marco =====
@@ -1066,6 +1373,12 @@ async function poll(){
       }
       if(currentView() === "login" || currentView() === "register"){
         setView("menu");
+      }
+
+      if(Array.isArray(st.recognizable_letters) && st.learning_language === currentLearningLanguage){
+        recognizableLetters = st.recognizable_letters;
+        if(currentView() === "aprendizaje") renderLetterNotice(learningNotice, learningTargetLetter);
+        if(currentView() === "repaso") renderLetterNotice(repasoNotice, repasoTargetLetter);
       }
 
       signText.value = st.sign_text || "";
@@ -1234,6 +1547,7 @@ function renderLearningLanguage(language){
   TTS.cancel();
   showTtsMessage("");
   languagePack = languagePacks[code] || LANGUAGE_FALLBACK[code];
+  recognizableLetters = null;
   applyLanguage();
   applySignAlphabet();
   loadActiveLanguagePack();
@@ -1274,6 +1588,7 @@ function applySignAlphabet(){
   // Repaso: los favoritos y el historial de 5 intentos son propios de cada idioma.
   repasoIndex = 0;
   repasoTargetLetter = null;
+  startRepasoRound();
   resetRepasoFeedback();
   if(lastLoggedIn){
     resetReviewSession();
@@ -1445,6 +1760,17 @@ $("btnOpenEvaluacion").onclick = () => {
   setView('evaluacion_config');
 };
 
+$("btnLearningRestart").onclick = () => {
+  learningIndex = 0;
+  learningCorrectCount = 0;
+  if(learningCounter) learningCounter.textContent = tr("correctCount", 0);
+  syncLearningView(LETTERS[0], `1/${LETTERS.length}`);
+};
+$("btnRepasoRestart").onclick = () => {
+  startRepasoRound();
+  repasoIndex = 0;
+  syncRepasoView();
+};
 $("btnPrevAprendizaje").onclick = () => moveLearning(-1);
 $("btnNextAprendizaje").onclick = () => moveLearning(1);
 if(btnStarLetter){
@@ -1464,6 +1790,7 @@ if($("btnOpenRepaso")){
   $("btnOpenRepaso").onclick = () => {
     repasoInitialLetter = null;
     repasoIndex = 0;
+    startRepasoRound();
     refreshFavoriteLetters().then(() => syncRepasoView());
     setView("repaso");
   };
@@ -1767,11 +2094,24 @@ $("btnStartEvaluation").onclick = () => {
 };
 
 // Reto: deletrea tu nombre o una palabra del idioma activo
+const retoPrompt = createErrorPrompt("reto", {
+  onKeep: async () => {
+    await window.pywebview.api.challenge_keep_practicing();
+    retoPrompt.hide();
+  },
+  onNext: async () => {
+    await window.pywebview.api.challenge_next_letter();
+    retoPrompt.hide();
+    const st = await window.pywebview.api.get_state(false);
+    if(st && st.logged_in) renderReto(st);
+  },
+});
+
 async function startReto(mode){
   retoMode = mode === "word" ? "word" : "name";
   retoAiHint.classList.add("hidden");
   await window.pywebview.api.challenge_start(retoMode);
-  const st = await window.pywebview.api.get_state();
+  const st = await window.pywebview.api.get_state(false);
   if(st && st.logged_in) renderReto(st);
 }
 $("btnOpenReto").onclick = async () => {

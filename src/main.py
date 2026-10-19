@@ -129,6 +129,24 @@ class MainController:
         self._challenge_active: bool = False
         self._challenge_match_count: int = 0
         self._challenge_hold_frames: int = 10  # frames consecutivos para confirmar cada letra
+        # Tras confirmar una letra se muestra "Correcto" ~1 s antes de avanzar.
+        self._challenge_advance_delay_s: float = 1.0
+        self._challenge_confirmed_at: Optional[float] = None
+        # Letra recien confirmada: se ignora hasta que la mano cambie o se retire,
+        # asi una misma seña sostenida no confirma tambien la letra siguiente (p. ej. "ANNA").
+        self._challenge_release_letter: Optional[str] = None
+        self._challenge_lock = threading.Lock()
+        # Intentos equivocados confirmados en la letra actual. Al llegar al limite
+        # el reto se pausa y la IA pregunta si guardar la letra para Repaso y si
+        # seguir con ella o pasar a la siguiente.
+        self._challenge_errors_to_prompt: int = 4
+        self._challenge_error_count: int = 0
+        self._challenge_error_prompt: bool = False
+        # Posiciones que la persona decidio pasar sin completarlas.
+        self._challenge_passed: list = []
+        # Ultima deteccion recibida (tambien durante la pausa), para no contar la
+        # sena que siga en camara al responder la pregunta de la IA.
+        self._challenge_last_letter: Optional[str] = None
 
         # ===== Estado de evaluacion WEB =====
         self._evaluation_active = False
@@ -715,9 +733,11 @@ class MainController:
         return {"ok": True, "language": language, "letters": letters}
 
     def get_web_state(self):
+        self._finish_challenge_confirmation()
         challenge_progress = 0.0
+        challenge_confirmed = self._challenge_confirmed_at is not None
         if self._challenge_letters and not self._challenge_done:
-            challenge_progress = self._challenge_match_count / float(self._challenge_hold_frames)
+            challenge_progress = 1.0 if challenge_confirmed else self._challenge_match_count / float(self._challenge_hold_frames)
         evaluation_remaining = 0
         if self._evaluation_active:
             evaluation_remaining = max(0, int(self._evaluation_deadline - time.monotonic()))
@@ -753,6 +773,11 @@ class MainController:
             "challenge_index": self._challenge_index,
             "challenge_done": self._challenge_done,
             "challenge_progress": min(1.0, challenge_progress),
+            "challenge_confirmed": challenge_confirmed,
+            "challenge_error_count": self._challenge_error_count,
+            "challenge_error_prompt": self._challenge_error_prompt,
+            "challenge_passed": list(self._challenge_passed),
+            "recognizable_letters": self._recognizable_letters(),
             "study_streak": self._study_streak,
             "evaluation_active": self._evaluation_active,
             "evaluation_remaining": evaluation_remaining,
@@ -772,6 +797,11 @@ class MainController:
         self._challenge_feedback = None
         self._challenge_wrong_letter = None
         self._challenge_wrong_count = 0
+        self._challenge_confirmed_at = None
+        self._challenge_release_letter = None
+        self._challenge_error_count = 0
+        self._challenge_error_prompt = False
+        self._challenge_passed = []
 
     def _pick_challenge_word(self) -> str:
         words = [w for w in get_profile(self._web_learning_language).challenge_words if w != self._challenge_word]
@@ -800,6 +830,11 @@ class MainController:
         self._challenge_feedback = None
         self._challenge_wrong_letter = None
         self._challenge_wrong_count = 0
+        self._challenge_confirmed_at = None
+        self._challenge_release_letter = None
+        self._challenge_error_count = 0
+        self._challenge_error_prompt = False
+        self._challenge_passed = []
         self._challenge_active = keep_active
 
     def on_challenge_start(self, mode: str = "name") -> None:
@@ -810,26 +845,84 @@ class MainController:
         """El usuario salio de la pantalla de reto (no hace falta seguir comparando letras)."""
         self._challenge_active = False
 
+    def _clear_challenge_error_state_locked(self, release_letter: Optional[str]) -> None:
+        # La sena que siga en camara no cuenta hasta que la mano cambie o se retire.
+        self._challenge_release_letter = release_letter
+        self._challenge_wrong_letter = None
+        self._challenge_wrong_count = 0
+        self._challenge_match_count = 0
+        self._challenge_error_count = 0
+        self._challenge_error_prompt = False
+
+    def on_challenge_keep_practicing(self) -> dict:
+        """Respuesta a la pregunta de la IA: seguir con la misma letra."""
+        with self._challenge_lock:
+            last = self._challenge_last_letter
+            target = self._challenge_letters[self._challenge_index] if self._challenge_letters and not self._challenge_done else None
+            self._clear_challenge_error_state_locked(last if last != target else None)
+        return {"ok": True}
+
+    def on_challenge_next_letter(self) -> dict:
+        """Respuesta a la pregunta de la IA: pasar a la letra siguiente sin completarla."""
+        with self._challenge_lock:
+            if not self._challenge_letters or self._challenge_done:
+                return {"ok": False}
+            self._clear_challenge_error_state_locked(self._challenge_last_letter)
+            self._challenge_feedback = None
+            self._challenge_confirmed_at = None
+            self._challenge_passed.append(self._challenge_index)
+            self._challenge_index += 1
+            if self._challenge_index >= len(self._challenge_letters):
+                self._challenge_done = True
+        return {"ok": True}
+
     def _advance_challenge(self, letter: Optional[str]) -> None:
         """
         Compara la letra detectada con la letra objetivo actual del reto.
-        Requiere sostener la seña correcta varios frames seguidos antes de avanzar,
-        para evitar que una deteccion aislada cuente como acierto.
+        Requiere sostener la seña correcta varios frames seguidos; al confirmarla
+        la UI muestra "Correcto" y ~1 s despues se avanza a la letra siguiente.
         """
-        if not self._challenge_letters or self._challenge_done:
+        with self._challenge_lock:
+            self._challenge_last_letter = letter
+            if not self._challenge_letters or self._challenge_done:
+                return
+            if self._challenge_confirmed_at is not None:
+                # Confirmacion en curso: ninguna deteccion cuenta hasta avanzar.
+                self._finish_challenge_confirmation_locked()
+                return
+            if self._challenge_error_prompt:
+                # La IA espera la decision de la persona.
+                return
+            if self._challenge_release_letter is not None:
+                if letter == self._challenge_release_letter:
+                    return
+                self._challenge_release_letter = None
+            target = self._challenge_letters[self._challenge_index]
+            if letter != target:
+                self._challenge_match_count = 0
+                self._track_challenge_mistake(target, letter)
+                return
+            self._challenge_wrong_letter = None
+            self._challenge_wrong_count = 0
+            self._challenge_match_count += 1
+            if self._challenge_match_count < self._challenge_hold_frames:
+                return
+            self._challenge_feedback = None
+            self._challenge_confirmed_at = time.monotonic()
+
+    def _finish_challenge_confirmation(self) -> None:
+        with self._challenge_lock:
+            self._finish_challenge_confirmation_locked()
+
+    def _finish_challenge_confirmation_locked(self) -> None:
+        """Avanza UNA sola vez cuando termina la pausa de confirmacion."""
+        if self._challenge_confirmed_at is None:
             return
-        target = self._challenge_letters[self._challenge_index]
-        if letter != target:
-            self._challenge_match_count = 0
-            self._track_challenge_mistake(target, letter)
+        if time.monotonic() - self._challenge_confirmed_at < self._challenge_advance_delay_s:
             return
-        self._challenge_wrong_letter = None
-        self._challenge_wrong_count = 0
-        self._challenge_match_count += 1
-        if self._challenge_match_count < self._challenge_hold_frames:
-            return
+        self._challenge_release_letter = self._challenge_letters[self._challenge_index]
+        self._challenge_confirmed_at = None
         self._challenge_match_count = 0
-        self._challenge_feedback = None
         self._challenge_index += 1
         if self._challenge_index >= len(self._challenge_letters):
             self._challenge_done = True
@@ -848,6 +941,13 @@ class MainController:
         else:
             self._challenge_wrong_letter = letter
             self._challenge_wrong_count = 1
+        # Un intento equivocado se confirma igual que uno correcto (varios frames
+        # seguidos) y cuenta una sola vez mientras la misma sena siga en camara.
+        if self._challenge_wrong_count == self._challenge_hold_frames:
+            self._challenge_error_count += 1
+            if self._challenge_error_count >= self._challenge_errors_to_prompt:
+                self._challenge_error_prompt = True
+                return
         if self._challenge_wrong_count != self._challenge_feedback_frames:
             return
         feedback = self._challenge_ai.analyze(

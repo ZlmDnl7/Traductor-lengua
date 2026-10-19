@@ -500,11 +500,13 @@ class ControllerLanguageSwitchTests(unittest.TestCase):
             c._advance_challenge("B")
         fb = c.get_web_state()["challenge_feedback"]
         self.assertEqual((fb["language"], fb["module"], fb["target_letter"]), ("en", "challenge", "A"))
-        # Acertar la letra limpia la pista y avanza.
+        # Acertar la letra limpia la pista; avanza tras la pausa de confirmacion.
         for _ in range(c._challenge_hold_frames):
             c._advance_challenge("A")
-        self.assertEqual(c._challenge_index, 1)
         self.assertIsNone(c._challenge_feedback)
+        c._challenge_confirmed_at -= c._challenge_advance_delay_s
+        c.get_web_state()
+        self.assertEqual(c._challenge_index, 1)
 
     def test_challenge_with_only_unsupported_characters_does_not_block(self):
         c = self.c
@@ -514,6 +516,194 @@ class ControllerLanguageSwitchTests(unittest.TestCase):
         self.assertEqual(st["challenge_letters"], [])
         self.assertEqual(st["challenge_skipped"], list("123"))
         c._advance_challenge("A")  # no debe fallar
+
+
+class ChallengeAutoAdvanceTests(unittest.TestCase):
+    """Reto: avance automatico tras confirmar la sena, en cada idioma (LSC / ASL / LIBRAS)."""
+
+    def setUp(self):
+        from src import main as main_module
+        from tests.fakes import FakeDB, controller_patches
+
+        patches = controller_patches(FakeDB())
+        for p in patches:
+            p.start()
+            self.addCleanup(p.stop)
+        self.c = main_module.MainController()
+        self.now = 1000.0
+        clock = mock.patch.object(main_module.time, "monotonic", lambda: self.now)
+        clock.start()
+        self.addCleanup(clock.stop)
+
+    def start(self, lang, username):
+        c = self.c
+        self.assertTrue(c.web_login(username, "secret", lang)[0])
+        c.web_set_learning_language(lang)
+        self.assertEqual(c._sign_classifier.language, lang)
+        c.on_challenge_start("name")
+        return c
+
+    def hold(self, letter, frames=None):
+        for _ in range(self.c._challenge_hold_frames if frames is None else frames):
+            self.c._advance_challenge(letter)
+
+    def test_confirmation_waits_one_second_and_advances_once(self):
+        for lang in LANGS:
+            with self.subTest(lang=lang):
+                c = self.start(lang, "anna")
+                self.assertEqual(c._challenge_letters, list("ANNA"))
+                # Sena incorrecta: permanece en la misma letra.
+                self.hold("B", 30)
+                self.assertEqual((c._challenge_index, c.get_web_state()["challenge_confirmed"]), (0, False))
+                # Una deteccion aislada no basta (varios frames consecutivos).
+                self.hold("A", c._challenge_hold_frames - 1)
+                self.c._advance_challenge(None)
+                self.hold("A", c._challenge_hold_frames - 1)
+                self.assertFalse(c.get_web_state()["challenge_confirmed"])
+                self.c._advance_challenge("A")
+                st = c.get_web_state()
+                self.assertEqual((st["challenge_confirmed"], st["challenge_index"], st["challenge_progress"]), (True, 0, 1.0))
+                # Durante la pausa ninguna deteccion cuenta.
+                self.now += 0.5
+                self.hold("A", 50)
+                self.hold("B", 50)
+                self.assertEqual(c.get_web_state()["challenge_index"], 0)
+                # ~1 s despues avanza exactamente una letra.
+                self.now += 0.5
+                st = c.get_web_state()
+                self.assertEqual((st["challenge_index"], st["challenge_confirmed"]), (1, False))
+                self.assertEqual(c.get_web_state()["challenge_index"], 1)
+
+                # N -> N: la misma sena sostenida no confirma tambien la segunda N.
+                self.hold("N")
+                self.now += 1.0
+                c.get_web_state()
+                self.assertEqual(c._challenge_index, 2)
+                self.hold("N", 100)
+                self.now += 5.0
+                self.assertEqual((c.get_web_state()["challenge_index"], c._challenge_confirmed_at), (2, None))
+                c._advance_challenge(None)  # retira la mano
+                self.hold("N")
+                self.now += 1.0
+                self.assertEqual(c.get_web_state()["challenge_index"], 3)
+
+                # Ultima letra: al terminar la pausa el reto queda completo.
+                self.hold("A")
+                self.assertFalse(c.get_web_state()["challenge_done"])
+                self.now += 1.0
+                st = c.get_web_state()
+                self.assertTrue(st["challenge_done"])
+                self.assertFalse(st["challenge_confirmed"])
+                c.web_logout()
+
+    def wrong_attempt(self, letter="B"):
+        self.hold(letter)
+        self.c._advance_challenge(None)  # retira la mano: el siguiente es un intento nuevo
+
+    def test_four_errors_pause_challenge_and_ask(self):
+        for lang in LANGS:
+            with self.subTest(lang=lang):
+                c = self.start(lang, "ana")
+                # Una misma sena equivocada sostenida cuenta como UN error.
+                self.hold("B", 60)
+                c._advance_challenge(None)
+                self.assertEqual(c.get_web_state()["challenge_error_count"], 1)
+                self.wrong_attempt()
+                self.wrong_attempt()
+                st = c.get_web_state()
+                self.assertEqual((st["challenge_error_count"], st["challenge_error_prompt"]), (3, False))
+                self.wrong_attempt("C")
+                st = c.get_web_state()
+                self.assertEqual((st["challenge_error_count"], st["challenge_error_prompt"]), (4, True))
+                # En pausa: ni la sena correcta avanza.
+                self.hold("A", 40)
+                self.now += 3.0
+                st = c.get_web_state()
+                self.assertEqual((st["challenge_index"], st["challenge_confirmed"]), (0, False))
+
+                # Seguir practicando: contador nuevo, misma letra.
+                c.on_challenge_keep_practicing()
+                st = c.get_web_state()
+                self.assertEqual((st["challenge_error_prompt"], st["challenge_error_count"], st["challenge_index"]), (False, 0, 0))
+                self.hold("A")
+                self.now += 1.0
+                self.assertEqual(c.get_web_state()["challenge_index"], 1)
+
+                # Pasar a la siguiente letra: no cuenta como acierto.
+                for _ in range(4):
+                    self.wrong_attempt()
+                self.assertTrue(c.get_web_state()["challenge_error_prompt"])
+                self.assertTrue(c.on_challenge_next_letter()["ok"])
+                st = c.get_web_state()
+                self.assertEqual((st["challenge_index"], st["challenge_passed"], st["challenge_error_prompt"]), (2, [1], False))
+                # Pasar la ultima letra termina el reto.
+                for _ in range(4):
+                    self.wrong_attempt()
+                c.on_challenge_next_letter()
+                st = c.get_web_state()
+                self.assertEqual((st["challenge_done"], st["challenge_passed"]), (True, [1, 2]))
+                self.assertFalse(c.on_challenge_next_letter()["ok"])
+                c.web_logout()
+
+    def test_wrong_sign_still_held_after_keep_does_not_count(self):
+        c = self.start("en", "ana")
+        for _ in range(3):
+            self.wrong_attempt()
+        self.hold("B")  # 4.o error, la mano sigue en camara
+        self.assertTrue(c._challenge_error_prompt)
+        c.on_challenge_keep_practicing()
+        self.hold("B", 50)
+        self.assertEqual(c.get_web_state()["challenge_error_count"], 0)
+        c._advance_challenge(None)
+        self.hold("B")
+        self.assertEqual(c.get_web_state()["challenge_error_count"], 1)
+
+    def test_hand_removed_during_prompt_counts_next_attempt(self):
+        c = self.start("es", "ana")
+        for _ in range(4):
+            self.wrong_attempt()  # la mano se retira tambien con la pregunta abierta
+        self.assertTrue(c._challenge_error_prompt)
+        c.on_challenge_keep_practicing()
+        self.hold("B")
+        self.assertEqual(c.get_web_state()["challenge_error_count"], 1)
+
+    def test_restart_clears_error_prompt(self):
+        c = self.start("pt", "ana")
+        for _ in range(4):
+            self.wrong_attempt()
+        c.on_challenge_start("name")
+        st = c.get_web_state()
+        self.assertEqual((st["challenge_error_prompt"], st["challenge_error_count"], st["challenge_passed"]), (False, 0, []))
+
+    def test_restart_clears_pending_confirmation(self):
+        c = self.start("pt", "ana")
+        self.hold("A")
+        c.on_challenge_start("name")
+        self.now += 2.0
+        st = c.get_web_state()
+        self.assertEqual((st["challenge_index"], st["challenge_confirmed"]), (0, False))
+
+    def test_recognizable_letters_follow_each_model(self):
+        c = self.c
+        c.web_login("ana", "secret", "es")
+        expected = {
+            "es": set("ABCDEFGHIJKLMNOPQRSTUVWXYZ"),  # LSC: la Ñ no tiene muestras
+            "en": set("ABCDEFGHIJKLMNOPQRSTUVWXYZ"),
+            "pt": set("ABCDEFGHIJKLMNOPQRSTUVWXYZ") | {"Ç"},  # Ç por movimiento
+        }
+        for lang in LANGS:
+            c.web_set_learning_language(lang)
+            letters = set(c.get_web_state()["recognizable_letters"])
+            self.assertEqual(letters, expected[lang], lang)
+            self.assertTrue(letters <= set(get_profile(lang).learning_alphabet))
+
+    def test_challenge_letters_are_spelled_in_active_alphabet(self):
+        # Un nombre con Ñ/Ç se adapta al alfabeto de cada idioma (nunca a otro).
+        c = self.start("es", "nuñez")
+        self.assertEqual(c._challenge_letters, list("NUNEZ"))
+        c.web_logout()
+        c = self.start("pt", "conça")
+        self.assertEqual(c._challenge_letters, list("CONÇA"))
 
 
 if __name__ == "__main__":
