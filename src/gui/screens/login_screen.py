@@ -38,7 +38,7 @@ class LoginScreen(ttk.Frame):
         card.grid(row=0, column=0, sticky="n", padx=10, pady=10)
         card.columnconfigure(0, weight=1)
 
-        ttk.Label(card, text="Traductor de Lenguaje de Señas", font=("", 18, "bold")).grid(row=0, column=0, sticky="w")
+        ttk.Label(card, text="Enseñando", font=("", 18, "bold")).grid(row=0, column=0, sticky="w")
         ttk.Label(card, text="Inicia sesión para continuar", font=("", 11)).grid(row=1, column=0, sticky="w", pady=(4, 18))
 
         ttk.Label(card, text="Usuario").grid(row=2, column=0, sticky="w")

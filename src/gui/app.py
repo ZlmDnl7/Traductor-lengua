@@ -6,7 +6,7 @@ import tkinter as tk
 import ttkbootstrap as ttk
 
 from src.config import APP_TITLE, WINDOW_MIN_WIDTH, WINDOW_MIN_HEIGHT
-from .screens import LoginScreen, RegisterScreen, MainMenuScreen, TranslationScreen, VoiceScreen, InteractionScreen
+from .screens import LoginScreen, RegisterScreen, MainMenuScreen, TranslationScreen, VoiceScreen, InteractionScreen, AprendizajeScreen
 
 
 class App:
@@ -70,6 +70,9 @@ class App:
             self._root,
             username=username,
             on_interaction=self._controller.on_open_interaction,
+            on_translation=self._controller.on_open_translation,
+            on_voice=self._controller.on_open_voice,
+            on_aprendizaje=self._controller.on_open_aprendizaje,
             on_logout=self._controller.on_logout,
         )
         self._show_screen(screen)
@@ -105,6 +108,14 @@ class App:
         )
         self._show_screen(screen)
         self._controller.set_interaction_screen(screen)
+
+    def show_aprendizaje(self) -> None:
+        screen = AprendizajeScreen(
+            self._root,
+            on_back=self._controller.on_aprendizaje_back,
+        )
+        self._show_screen(screen)
+        self._controller.set_aprendizaje_screen(screen)
 
     def get_root(self) -> tk.Tk:
         return self._root

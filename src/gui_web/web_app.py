@@ -19,12 +19,12 @@ class WebApp:
         api = self._controller.get_web_api()
 
         window = webview.create_window(
-            title="Traductor de Lenguaje de Señas",
+            title="Enseñando",
             url=html_path,
             js_api=api,
             width=1280,
             height=720,
-            min_size=(960, 600),
+            min_size=(360, 600),
         )
 
         # Cierre limpio

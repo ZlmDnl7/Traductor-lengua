@@ -5,8 +5,12 @@ import tkinter as tk
 from typing import Callable, Optional
 
 import ttkbootstrap as ttk
-from ttkbootstrap.scrolled import ScrolledFrame
-
+try:
+    # ttkbootstrap >= 2.0 movio ScrolledFrame a widgets.scrolled
+    from ttkbootstrap.widgets.scrolled import ScrolledFrame
+except ImportError:
+    # ttkbootstrap 1.x
+    from ttkbootstrap.scrolled import ScrolledFrame
 
 class InteractionScreen(ttk.Frame):
     """

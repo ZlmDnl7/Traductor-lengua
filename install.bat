@@ -1,5 +1,5 @@
 @echo off
-REM Script de instalacion - Traductor de Lenguaje de Senas
+REM Script de instalacion - Ensenando
 REM Ejecutar desde la raiz del proyecto
 
 echo Creando entorno virtual (si no existe)...

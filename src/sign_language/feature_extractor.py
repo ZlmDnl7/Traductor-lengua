@@ -71,7 +71,7 @@ def _inter_finger_angle(lm: Landmarks, tip_a: int, tip_b: int) -> float:
     wx, wy = _xy(lm[_WRIST])
     ax, ay = _xy(lm[tip_a])
     bx, by = _xy(lm[tip_b])
-    return _angle_between((ax - wx, ay - wy), (bx - wx, by - by))
+    return _angle_between((ax - wx, ay - wy), (bx - wx, by - wy))
 
 
 def _palm_orientation(lm: Landmarks) -> float:

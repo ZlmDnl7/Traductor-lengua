@@ -1,0 +1,11 @@
+.git
+.env
+.env.*
+venv
+.venv
+env
+__pycache__
+*.py[cod]
+tests
+database/*.db*
+data/sign_language/*_old.*
